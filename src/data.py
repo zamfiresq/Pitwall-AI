@@ -13,7 +13,7 @@ DATA_DIR = Path(__file__).resolve().parents[1] / "data" / "processed"
 CACHE_DIR = Path(__file__).resolve().parents[1] / ".fastf1_cache"
 
 
-def load_ferrari_race_laps(year: int = YEAR) -> pd.DataFrame:
+def load_ferrari_race_laps(year: int) -> pd.DataFrame:
     # load race laps for Ferrari s Leclerc and Hamilton across a season
     CACHE_DIR.mkdir(parents=True, exist_ok=True)
     fastf1.Cache.enable_cache(str(CACHE_DIR))
