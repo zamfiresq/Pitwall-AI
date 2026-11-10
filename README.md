@@ -20,11 +20,16 @@ pip install -r requirements.txt
 python -m src.data
 python -m src.model
 python -m src.degradation
+streamlit run app.py
 ```
 
 FastF1 downloads/cache data locally on first run. The data downloader includes per-lap weather observations, so rerun `python -m src.data` after installing dependencies to refresh the season CSVs. Raw data and model files are not committed. Missing or unavailable events are skipped and reported by the downloader.
 
 The adjusted season-level estimates are saved to `data/processed/ferrari_tyre_degradation_estimates.csv`. Robust observed slopes are also saved per stint, per race/pilot/compound, and per season/pilot/compound. Their percentile intervals resample complete stints, keeping laps from the same stint together. A positive value means lap time tends to rise as tyre age increases. The per-stint slopes are observed pace trends, not pure physical measurements of tyre wear: fuel effects, traffic, car changes, and strategy can still affect lap times. Groups with only one stint have no cluster-bootstrap interval because there is not enough independent data to estimate between-stint uncertainty.
+
+## Dashboard
+
+Run `streamlit run app.py` after generating the season data and degradation reports. The dashboard filters by season, race, driver, and tyre compound. It displays lap time against tyre age, adjusted season estimates, stint-bootstrap summaries, and the spread of observed stint slopes.
 
 ## Next milestones
 

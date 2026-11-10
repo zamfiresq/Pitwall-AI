@@ -6,5 +6,6 @@ statsmodels
 joblib
 streamlit
 matplotlib
+plotly
 python-dotenv
 openai
