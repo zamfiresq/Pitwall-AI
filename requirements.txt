@@ -2,10 +2,10 @@ fastf1
 pandas
 numpy
 scikit-learn
-statsmodels
+scipy
 joblib
 streamlit
-matplotlib
 plotly
+matplotlib
 python-dotenv
 openai

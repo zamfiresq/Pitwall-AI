@@ -1,0 +1,94 @@
+{
+  "target": "Lap time minus the driver's median lap time in that race (seconds)",
+  "laps": 3879,
+  "race_weekends": 44,
+  "cv_scheme": "8-fold, grouped by race weekend",
+  "cross_validation": [
+    {
+      "name": "Baseline: race median pace",
+      "mae": 0.7341013147718486,
+      "rmse": 0.9567962296828643,
+      "improvement_pct": 0.0
+    },
+    {
+      "name": "Linear: race progress + compound",
+      "complexity": 1,
+      "mae": 0.555877854994731,
+      "rmse": 0.7524321363983169,
+      "improvement_pct": 24.277774224189706
+    },
+    {
+      "name": "Linear: + tyre age",
+      "complexity": 2,
+      "mae": 0.5264562010135497,
+      "rmse": 0.7093237263831714,
+      "improvement_pct": 28.28562074198613
+    },
+    {
+      "name": "Gradient boosting: + driver & weather",
+      "complexity": 3,
+      "mae": 0.5223505536562141,
+      "rmse": 0.7073544976439367,
+      "improvement_pct": 28.8448960456425
+    }
+  ],
+  "season_holdout": {
+    "train": 2025,
+    "test": 2026,
+    "models": [
+      {
+        "name": "Baseline: race median pace",
+        "mae": 0.6903843092666287,
+        "rmse": 0.9206750254885118,
+        "improvement_pct": 0.0
+      },
+      {
+        "name": "Linear: race progress + compound",
+        "mae": 0.5452198956541949,
+        "rmse": 0.7361321069681829,
+        "improvement_pct": 21.026609623651048
+      },
+      {
+        "name": "Linear: + tyre age",
+        "mae": 0.5280170966608988,
+        "rmse": 0.6929581764808819,
+        "improvement_pct": 23.51838105622751
+      },
+      {
+        "name": "Gradient boosting: + driver & weather",
+        "mae": 0.5338600242216043,
+        "rmse": 0.7024438383720385,
+        "improvement_pct": 22.672051340693823
+      }
+    ]
+  },
+  "selected_model": "Linear: + tyre age",
+  "by_compound": [
+    {
+      "compound": "HARD",
+      "laps": 1626,
+      "baseline_mae": 0.6364606396063966,
+      "model_mae": 0.48861626389683266
+    },
+    {
+      "compound": "MEDIUM",
+      "laps": 1550,
+      "baseline_mae": 0.7361099999999998,
+      "model_mae": 0.5218702960823333
+    },
+    {
+      "compound": "SOFT",
+      "laps": 703,
+      "baseline_mae": 0.9555099573257465,
+      "model_mae": 0.6240890465258794
+    }
+  ],
+  "legacy": {
+    "random_forest_mae": 3.5874527605565993,
+    "naive_circuit_mean_mae": 3.201648623633015,
+    "random_forest_mae_seen_circuits": 3.028557157349095,
+    "random_forest_mae_unseen_circuits": 12.357032861794366,
+    "unseen_circuit_laps": 110,
+    "test_laps": 1836
+  }
+}
