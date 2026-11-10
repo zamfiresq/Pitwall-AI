@@ -2,6 +2,7 @@ fastf1
 pandas
 numpy
 scikit-learn
+statsmodels
 joblib
 streamlit
 matplotlib

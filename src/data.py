@@ -14,7 +14,7 @@ CACHE_DIR = Path(__file__).resolve().parents[1] / ".fastf1_cache"
 
 
 def load_ferrari_race_laps(year: int) -> pd.DataFrame:
-    # load race laps for Ferrari s Leclerc and Hamilton across a season
+    # load race laps for ferrari s leclerc and hamilton across a season
     CACHE_DIR.mkdir(parents=True, exist_ok=True)
     fastf1.Cache.enable_cache(str(CACHE_DIR))
     schedule = fastf1.get_event_schedule(year, include_testing=False)
@@ -25,10 +25,16 @@ def load_ferrari_race_laps(year: int) -> pd.DataFrame:
             continue
         try:
             session = fastf1.get_session(year, event["RoundNumber"], "R")
-            session.load(laps=True, telemetry=False, weather=False, messages=False)
-            laps = session.laps
+            session.load(laps=True, telemetry=False, weather=True, messages=False)
+            laps = session.laps.copy()
             if laps.empty:
                 continue
+
+            # FastF1 returns one weather observation for each lap in this table.
+            weather = laps.get_weather_data()
+            for column in ("AirTemp", "TrackTemp", "Rainfall", "Humidity"):
+                if column in weather:
+                    laps[f"Weather_{column}"] = weather[column].to_numpy()
 
             ferrari = laps[
                 laps["Driver"].isin(DRIVERS)
@@ -52,9 +58,12 @@ def load_ferrari_race_laps(year: int) -> pd.DataFrame:
 
 
 def clean_laps(laps: pd.DataFrame) -> pd.DataFrame:
-    """Keep representative green-flag laps and retain useful audit columns."""
+    # keep representative green flag laps and retain useful audit columns
     data = laps.copy()
-    required = ["LapTimeSeconds", "TyreLife", "Compound", "LapNumber", "Driver", "EventName"]
+    required = [
+        "LapTimeSeconds", "TyreLife", "Compound", "LapNumber",
+        "Driver", "EventName", "Stint",
+    ]
     data = data.dropna(subset=required)
     data = data[data["LapTimeSeconds"].between(60, 180)]
     data = data[data["TyreLife"].between(1, 80)]
@@ -70,7 +79,7 @@ def clean_laps(laps: pd.DataFrame) -> pd.DataFrame:
     if "TrackStatus" in data:
         data = data[data["TrackStatus"].astype(str) == "1"]
 
-    # Exclude the opening lap, which has unusual starts and bunching.
+    # exclude the opening lap, which has unusual starts and bunching
     data = data[data["LapNumber"] > 1]
     data["TyreLife"] = data["TyreLife"].astype(float)
     data["LapNumber"] = data["LapNumber"].astype(float)
