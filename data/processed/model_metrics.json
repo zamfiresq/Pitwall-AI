@@ -90,5 +90,80 @@
     "random_forest_mae_unseen_circuits": 12.357032861794366,
     "unseen_circuit_laps": 110,
     "test_laps": 1836
+  },
+  "ablation": [
+    {
+      "removed": "Nothing (full model)",
+      "mae": 0.5223505536562141,
+      "delta_mae": 0.0
+    },
+    {
+      "removed": "Tyre age",
+      "mae": 0.5754487199174372,
+      "delta_mae": 0.0530981662612231
+    },
+    {
+      "removed": "Race progress / fuel",
+      "mae": 0.6782417016004334,
+      "delta_mae": 0.15589114794421932
+    },
+    {
+      "removed": "Compound",
+      "mae": 0.5233571329928183,
+      "delta_mae": 0.0010065793366041964
+    },
+    {
+      "removed": "Driver",
+      "mae": 0.5234735547581605,
+      "delta_mae": 0.0011230011019464081
+    },
+    {
+      "removed": "Weather",
+      "mae": 0.5214885591594153,
+      "delta_mae": -0.0008619944967988014
+    }
+  ],
+  "whatif": {
+    "model_name": "Linear: + tyre age",
+    "spec": {
+      "categorical": [
+        "Compound"
+      ],
+      "categories": [
+        [
+          "HARD",
+          "MEDIUM",
+          "SOFT"
+        ]
+      ],
+      "numeric": [
+        "Progress",
+        "TyreLife"
+      ],
+      "mean": [
+        0.5343144987667795,
+        14.675947409126064
+      ],
+      "scale": [
+        0.2815299813480933,
+        8.778616386984353
+      ],
+      "coef": [
+        -0.02558727253452836,
+        0.05642039836671629,
+        -0.030833125831921434,
+        -0.7171007432974581,
+        0.28572143510075254
+      ],
+      "intercept": 0.03219514697926513
+    },
+    "interval_half_width_s": {
+      "0.8": 0.8059255380183099,
+      "0.9": 1.1016429673798935
+    },
+    "interval_coverage": {
+      "0.8": 0.8004640371229699,
+      "0.9": 0.8997164217581851
+    }
   }
 }

@@ -1,93 +1,124 @@
 # Pitwall AI
 
-A Ferrari-focused Formula 1 analytics project for Charles Leclerc (`LEC`) and Lewis Hamilton (`HAM`).
-It downloads 2025 and 2026 race laps with FastF1, estimates **tyre degradation** per season, compound, driver
-and stint with honest uncertainty, and fits a **race-pace model** that is scored against a naive baseline.
-Results are explored in a Streamlit dashboard styled after F1 timing screens and Ferrari colours.
+A Ferrari-focused Formula 1 analytics project for Charles Leclerc (`LEC`) and Lewis Hamilton (`HAM`). It downloads
+2025 and 2026 race laps with FastF1, estimates **tyre degradation** with honest uncertainty, fits a **race-pace model**
+scored against a baseline, simulates **pit strategies**, and answers questions through an **LLM assistant whose
+numbers are checked against the data**. Everything is explored in a Streamlit dashboard styled after F1 timing screens.
 
-> Exploratory analysis, not a live strategy system. Lap time also depends on traffic, fuel, weather, car
-> updates and driver behaviour, so every estimate is shown with its uncertainty.
+> Exploratory analysis, not a live strategy system. Lap time also depends on fuel, weather, car updates and
+> driver behaviour, so every estimate is shown with its uncertainty.
 
-## What it does
+![Degradation by compound](docs/degradation.png)
+![Race-pace model error](docs/model_comparison.png)
 
-- **Data:** FastF1 race laps for both Ferrari drivers, with per-lap weather, cached locally.
-- **Cleaning:** removes pit in/out laps, deleted/inaccurate laps, non-green laps and lap 1 (`src/data.py`), then
-  dry-weather and outlier filters for analysis (`src/cleaning.py`).
-- **Degradation (`src/degradation.py`):**
-  - Huber-robust regression of lap time on tyre age, one slope per compound, with event-driver fixed effects,
-    race lap and track/air temperature as controls.
-  - 95% intervals from a **bootstrap that resamples whole stints**, since laps in one stint are not independent.
-  - Per-stint Theil-Sen slopes, with and without a **fuel-burn correction** taken from the regression.
-- **Pace model (`src/model.py`):** predicts lap time relative to the driver's race median, evaluated with
-  cross-validation that holds out whole race weekends, against a baseline.
-- **Dashboard (`app.py`):** filters by season, Grand Prix, driver and compound; five tabs (race pace, tyre
-  degradation, race table, pace model, method).
+<!-- ## What it does
+
+| Part | Where | What |
+|---|---|---|
+| Data | `src/data.py`, `src/cleaning.py` | FastF1 laps and weather; pit, deleted, non-green and lap-1 laps removed; dry-only, sensor-error and slow-lap filters for analysis |
+| Degradation | `src/degradation.py` | Huber-robust regression with event-driver fixed effects, 95% intervals from a **bootstrap over whole stints**, per-stint Theil-Sen slopes with a **fuel-burn correction** |
+| Pace model | `src/model.py` | Predicts lap time relative to the driver's race median; **cross-validation grouped by race weekend**, baselines, feature ablation, prediction intervals with checked coverage |
+| Strategy lab | `src/whatif.py` | 1- and 2-stop simulator with degradation uncertainty; pace what-if with prediction bands |
+| Assistant | `src/assistant/` | Tool-calling LLM agent, grounding check on every number, automatic evaluation |
+| Tracking | `src/tracking.py` | One JSON line per run (parameters, metrics, git commit) in `experiments/runs.jsonl` |
+| Dashboard | `app.py` | Six tabs: race pace, tyre degradation, race table, pace model, strategy lab, Ask Pitwall | -->
 
 ## Results snapshot
 
-Adjusted degradation in seconds lost per additional tyre lap (dry laps, 95% stint-bootstrap interval):
+Adjusted degradation, seconds lost per additional tyre lap (dry laps, 95% stint-bootstrap interval):
 
 | Season | Soft | Medium | Hard |
 |---|---|---|---|
 | 2025 | 0.074 [0.048, 0.104] | 0.044 [0.028, 0.059] | 0.035 [0.018, 0.049] |
 | 2026 | 0.037 [0.000, 0.071] | 0.032 [0.023, 0.055] | 0.030 [0.015, 0.057] |
 
-Race-pace model (error in seconds, lower is better), 3,879 dry laps from 44 race weekends:
+Race-pace model (mean absolute error in seconds, lower is better), 3,879 dry laps from 44 race weekends:
 
-| Evaluation | Baseline MAE | Selected model MAE | Improvement |
+| Evaluation | Baseline | Selected model | Improvement |
 |---|---|---|---|
 | Grouped cross-validation (by weekend) | 0.734 | 0.526 | 28% |
 | Train 2025, test 2026 | 0.690 | 0.528 | 24% |
 
-The first version of the model predicted absolute lap time from the circuit name. On 2026 it scored 3.59 s MAE,
-worse than simply using each circuit's 2025 average (3.20 s), and 12.4 s on laps at circuits it had never seen.
-Predicting relative pace removes the circuit effect. The comparison is kept in `src/model.py` and in the dashboard.
+Findings worth knowing:
 
-Two methodological points worth knowing:
+1. **The first model was worse than a naive baseline.** The original Random Forest predicted absolute lap time from the
+   circuit name: 3.59 s MAE on 2026 versus 3.20 s for simply using each circuit's 2025 average, and 12.4 s on circuits it
+   had never seen. Predicting pace relative to the race median removes the circuit effect.
+2. **Classical regression intervals were about three times too narrow** (2025 hard: 0.030 to 0.039) because they treat laps as
+   independent. The stint bootstrap gives 0.018 to 0.049.
+3. **Raw per-stint slopes understate wear.** The car gets lighter every lap; the regression puts that effect near
+   -0.046 s per lap in 2025 and -0.039 s in 2026, which the fuel correction removes.
+4. **Feature ablation:** removing race progress (fuel burn) raises error by 0.16 s and removing tyre age by 0.05 s, while
+   compound, driver and weather change it by about 0.001 s. Relative pace is explained by fuel and tyre age, not by those.
+5. **Prediction intervals are calibrated:** leaving each race weekend out in turn, the 80% and 90% bands (±0.81 s and
+   ±1.10 s) contained 80.0% and 90.0% of laps.
+6. **Compound pace gaps cannot be estimated from these races.** A diagnostic regression gave medium-versus-hard offsets whose
+   intervals included zero, so the strategy simulator takes them as adjustable assumptions instead of pretending to measure them.
 
-1. Classical regression intervals were about three times too narrow (for example 2025 hard: 0.030 to 0.039) because
-   they treated laps as independent. The stint bootstrap widens them to 0.018 to 0.049.
-2. Raw per-stint slopes understate wear because the car gets lighter every lap. The regression puts that effect at
-   about -0.046 s per lap in 2025 and -0.039 s in 2026, which is what the fuel correction removes.
-
-## Run
+## Setup
 
 ```bash
 python -m venv .venv
-source .venv/bin/activate  # Windows: .venv\Scripts\activate
-pip install -r requirements.txt
-python -m src.data          # download and clean laps (first run is slow, then cached)
-python -m src.degradation   # degradation estimates and stint summaries
-python -m src.model         # pace model, metrics and held-out predictions
+source .venv/bin/activate        # Windows: .venv\Scripts\activate
+pip install -r requirements-pipeline.txt   # everything; use requirements.txt for the dashboard only
+python -m src.data               # download and clean laps (slow on first run, then cached)
+python -m src.degradation        # degradation estimates and stint summaries
+python -m src.model              # pace model, metrics, intervals and ablation
 streamlit run app.py
 ```
 
-Tests (offline, no FastF1 needed): `pip install pytest && python -m pytest tests`
+## Assistant ("Ask Pitwall")
 
-Outputs land in `data/processed/` (CSVs, `model_metrics.json`) and `models/` (not committed). The dashboard theme is
-in `.streamlit/config.toml` and `src/theme.py`.
+The assistant uses an Ollama-compatible chat endpoint that supports tool calling. Create a `.env` file in the project root
+with either `PITWALL_LLM_API_KEY` (and optionally `PITWALL_LLM_MODEL`) for a hosted provider, or set
+`PITWALL_LLM_BASE_URL` and `PITWALL_LLM_MODEL` for a local Ollama model. Ollama does not need an API key. Keep `.env` private
+and do not commit it.
 
-## Project layout
+It can only call six analysis tools, and each result carries a `source` it must cite. Two safeguards run on every answer:
 
+- **Grounding check** (`src/assistant/grounding.py`): each number in the answer must equal a tool value rounded to the precision it
+  is written with (or a simple difference of two). Anything else is flagged in the UI as not found in the data.
+- **Scope rules** in the system prompt: no outside knowledge for figures, and it must say so when the data cannot answer.
+
+Measure it with a fixed question set whose correct answers are computed from your data:
+
+```bash
+python -m src.assistant.evaluation            # add --limit 5 for a quick run
 ```
-app.py                 Streamlit dashboard
-src/data.py            FastF1 download and basic lap cleaning
-src/cleaning.py        analysis-time cleaning shared by the modules below
-src/degradation.py     degradation regression, cluster bootstrap, stint slopes
-src/model.py           relative-pace model, grouped CV, baselines
-src/theme.py           F1 / Ferrari palette, CSS and Plotly styling
-tests/                 unit tests for cleaning and estimation
+
+It scores tool choice, correct values, grounding, source citation and whether the model declines out-of-scope questions
+(other drivers, other seasons, predictions, opinions), writes `data/processed/assistant_eval.json`, and the dashboard shows the
+summary. No results are published here because they depend on the model you use. The unit tests exercise the plumbing with a
+scripted stand-in model, not a real one.
+
+## Strategy lab
+
+Total race time for a plan is the sum of per-stint tyre-age losses plus pit stops and compound pace gaps; fuel burn depends only on
+race lap, so it cancels. Degradation and its interval come from the regression. Sampling 1,000 degradation draws gives each plan's
+expected time lost versus the best plan and its chance of being best. Stint lengths are capped at the 90th percentile of observed
+stints. **Not modelled:** stint order, traffic, safety cars, tyre cliffs, weather. The compound gaps are inputs you set.
+
+<!-- ## Tests and CI
+
+```bash
+python -m pytest tests
 ```
 
-## Notes and limits
+Tests cover cleaning, the regression and its bootstrap coverage, the what-if export versus scikit-learn, strategy rules, the
+grounding check, tools and the evaluation harness. GitHub Actions (`.github/workflows/ci.yml`) runs them on every push. -->
 
-- Two seasons from one team: some compound and driver groups have few stints, and their intervals are wide.
-- 2026 follows major regulation changes, so 2025 to 2026 transfer is a genuine test, not a given.
-- Fonts: the official F1 and Ferrari typefaces are proprietary, so the dashboard uses Titillium Web. Swap the
-  `FONT_DISPLAY` / `FONT_BODY` values in `src/theme.py` if you hold a licence for another font.
+<!-- ## Deploy
 
-## Next steps
+**Docker**
 
-1. Add an LLM tool that answers questions from the computed results and cites the selected race and laps.
-2. Model traffic with gap-to-car-ahead data (needs telemetry or position data).
-3. Extend to the full grid to test whether Ferrari's degradation is unusual.
+```bash
+docker build -t pitwall-ai .
+docker run -p 8501:8501 --env-file .env pitwall-ai
+```
+
+For a model on the host machine, set `PITWALL_LLM_BASE_URL=http://host.docker.internal:11434/v1`.
+
+**Streamlit Community Cloud:** point it at `app.py`. It installs `requirements.txt` (no FastF1 or scikit-learn needed). The processed
+CSVs and `model_metrics.json` are committed so the app has data. Put the LLM settings in the app's Secrets (top-level keys are also
+exposed as environment variables); never commit `.env`. -->
+

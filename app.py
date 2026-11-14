@@ -3,11 +3,17 @@ from __future__ import annotations
 import json
 from pathlib import Path
 
+import numpy as np
 import pandas as pd
 import plotly.express as px
+import plotly.graph_objects as go
 import streamlit as st
 
 from src import theme
+from src.assistant.agent import LLMConfig, answer_question, make_client
+from src.assistant.tools import PitwallData
+from src.tracking import read_runs
+from src.whatif import predict_linear, simulate_strategies
 
 ROOT = Path(__file__).resolve().parent
 DATA_DIR = ROOT / "data" / "processed"
@@ -50,6 +56,22 @@ def load_table(filename: str) -> pd.DataFrame:
 def load_metrics() -> dict:
     path = DATA_DIR / "model_metrics.json"
     return json.loads(path.read_text()) if path.exists() else {}
+
+
+@st.cache_data
+def load_metrics_file(filename: str) -> dict:
+    path = DATA_DIR / filename
+    return json.loads(path.read_text()) if path.exists() else {}
+
+
+@st.cache_resource
+def load_pitwall_data() -> PitwallData:
+    return PitwallData(DATA_DIR)
+
+
+@st.cache_resource
+def get_client():
+    return make_client(LLMConfig.from_env())
 
 
 def fmt_lap(seconds: float) -> str:
@@ -133,8 +155,8 @@ kpi[1].metric("Stints", f"{filtered['StintKey'].nunique():,}")
 kpi[2].metric("Grands Prix", f"{filtered[['Year', 'EventName']].drop_duplicates().shape[0]:,}")
 kpi[3].metric("Fastest lap", fmt_lap(filtered["LapTimeSeconds"].min()) if not filtered.empty else "—")
 
-tab_pace, tab_deg, tab_table, tab_model = st.tabs(
-    ["Race pace", "Tyre degradation", "Race table", "Pace model"]
+tab_pace, tab_deg, tab_table, tab_model, tab_lab, tab_ask = st.tabs(
+    ["Race pace", "Tyre degradation", "Race table", "Pace model", "Strategy lab", "Ask Pitwall"]
 )
 
 # ---------------------------------------------------------------- race pace
@@ -163,7 +185,7 @@ with tab_pace:
         )
         pace_fig.update_traces(marker={"size": 6}, line={"width": 1.8})
         theme.style_fig(pace_fig, height=420)
-        st.plotly_chart(pace_fig, use_container_width=True, config={"displayModeBar": False})
+        st.plotly_chart(pace_fig, width="stretch", config={"displayModeBar": False})
         if fuel_on:
             st.caption("Lap times are adjusted to a constant fuel load using the season's race-lap effect.")
 
@@ -194,7 +216,7 @@ with tab_deg:
             )
             model_fig.add_hline(y=0, line_dash="dot", line_color=theme.MUTED)
             theme.style_fig(model_fig, height=330)
-            st.plotly_chart(model_fig, use_container_width=True, config={"displayModeBar": False})
+            st.plotly_chart(model_fig, width="stretch", config={"displayModeBar": False})
             st.caption(
                 "Whiskers: 95% interval from a bootstrap that resamples whole stints, because laps within "
                 "a stint are not independent."
@@ -223,7 +245,7 @@ with tab_deg:
             )
             driver_fig.add_hline(y=0, line_dash="dot", line_color=theme.MUTED)
             theme.style_fig(driver_fig, height=330)
-            st.plotly_chart(driver_fig, use_container_width=True, config={"displayModeBar": False})
+            st.plotly_chart(driver_fig, width="stretch", config={"displayModeBar": False})
             st.caption(
                 "Bars: median of per-stint slopes. Whiskers: 95% stint bootstrap. "
                 + ("Fuel-corrected." if use_fuel_cols else "Raw slopes include the fuel-burn effect, so they understate wear.")
@@ -250,7 +272,7 @@ with tab_deg:
         )
         slope_fig.add_hline(y=0, line_dash="dot", line_color=theme.MUTED)
         theme.style_fig(slope_fig, height=350)
-        st.plotly_chart(slope_fig, use_container_width=True, config={"displayModeBar": False})
+        st.plotly_chart(slope_fig, width="stretch", config={"displayModeBar": False})
         st.caption("Slopes are observed pace trends and can still include traffic, strategy and track evolution.")
 
 # ---------------------------------------------------------------- race table
@@ -308,7 +330,7 @@ with tab_model:
             color_discrete_sequence=[theme.RED, theme.YELLOW], text_auto=".3f",
         )
         theme.style_fig(eval_fig, height=320)
-        st.plotly_chart(eval_fig, use_container_width=True, config={"displayModeBar": False})
+        st.plotly_chart(eval_fig, width="stretch", config={"displayModeBar": False})
 
         st.markdown("**Predicted vs actual pace, held-out predictions**")
         if oof.empty or event_choice == "All Grands Prix":
@@ -333,7 +355,7 @@ with tab_model:
                 )
                 pred_fig.add_hline(y=0, line_dash="dot", line_color=theme.MUTED)
                 theme.style_fig(pred_fig, height=350)
-                st.plotly_chart(pred_fig, use_container_width=True, config={"displayModeBar": False})
+                st.plotly_chart(pred_fig, width="stretch", config={"displayModeBar": False})
 
         by_compound = pd.DataFrame(metrics.get("by_compound", []))
         if not by_compound.empty:
@@ -354,3 +376,142 @@ with tab_model:
                 f"{legacy['random_forest_mae_unseen_circuits']:.1f} s on the {legacy['unseen_circuit_laps']} laps at circuits it had not seen. "
                 "Predicting pace relative to the race median removes the circuit effect and beats its baseline."
             )
+
+# ---------------------------------------------------------------- strategy lab
+with tab_lab:
+    st.subheader("Strategy simulator")
+    theme.callout(
+        "<b>Read this first:</b> degradation comes from the data, but the pace gap between compounds cannot be estimated "
+        "reliably from these races (the intervals include zero), so the gaps below are <b>assumptions you can change</b>. "
+        "Tyre wear is modelled as linear, stint order is ignored, and traffic, safety cars and weather are not modelled. "
+        "Use it to see how sensitive a plan is, not to predict a result."
+    )
+    lab_ready = not adjusted.empty and "TyreAgeP90" in adjusted
+    if not lab_ready:
+        st.info("Run `python -m src.degradation` to generate the degradation estimates the simulator needs.")
+    else:
+        seasons = sorted(adjusted["Year"].astype(int).unique().tolist())
+        row1 = st.columns(4)
+        lab_year = row1[0].selectbox("Degradation from season", seasons, index=len(seasons) - 1, key="lab_year")
+        race_laps = row1[1].slider("Race distance (laps)", 30, 80, 57, 1, key="lab_laps")
+        pit_loss = row1[2].slider("Pit-stop time loss (s)", 15.0, 30.0, 22.0, 0.5, key="lab_pit")
+        max_stops = row1[3].selectbox("Maximum stops", [1, 2], index=1, key="lab_stops")
+        row2 = st.columns(2)
+        medium_gap = row2[0].slider("Medium pace vs hard (s per lap, assumption)", -1.0, 0.0, -0.35, 0.05, key="lab_medium")
+        soft_gap = row2[1].slider("Soft pace vs hard (s per lap, assumption)", -1.5, 0.0, -0.70, 0.05, key="lab_soft")
+
+        season_rows = adjusted[adjusted["Year"].astype(int) == int(lab_year)]
+        degradation = {
+            r.Compound: (r.DegradationSecondsPerTyreLap, r.CI95Lower, r.CI95Upper) for r in season_rows.itertuples()}
+        stint_limit = {r.Compound: int(round(r.TyreAgeP90)) for r in season_rows.itertuples()}
+        plans = simulate_strategies(
+            race_laps, degradation, {"HARD": 0.0, "MEDIUM": medium_gap, "SOFT": soft_gap},
+            pit_loss, stint_limit, max_stops=max_stops)
+        if plans.empty:
+            st.info("No legal strategy fits this race distance within the observed stint lengths. Try fewer laps or allow 2 stops.")
+        else:
+            shown = plans.head(8).copy()
+            shown["Plan"] = shown["Stops"].map({1: "1 stop", 2: "2 stops"})
+            plan_fig = px.bar(
+                shown, x="ExpectedRaceTimeLoss_s", y="Strategy", orientation="h", color="Plan",
+                color_discrete_map={"1 stop": theme.RED, "2 stops": theme.YELLOW},
+                hover_data=["ProbabilityBest"],
+                labels={"ExpectedRaceTimeLoss_s": "Expected time lost vs the best plan (s)", "ProbabilityBest": "Chance it is best"},
+            )
+            plan_fig.update_yaxes(autorange="reversed")
+            theme.style_fig(plan_fig, height=380)
+            st.plotly_chart(plan_fig, width="stretch", config={"displayModeBar": False})
+            st.dataframe(
+                shown[["Strategy", "Stops", "ExpectedRaceTimeLoss_s", "ProbabilityBest"]].rename(columns={
+                    "ExpectedRaceTimeLoss_s": "Expected loss (s)", "ProbabilityBest": "Chance it is best"}).round(3),
+                hide_index=True,
+            )
+            st.caption(
+                "Each plan lists stint lengths in laps (order is not modelled). Uncertainty comes from the 95% degradation "
+                f"interval, sampled 1,000 times. Stint lengths are capped at the 90th percentile of observed {lab_year} stints: "
+                + ", ".join(f"{c.title()} {n}" for c, n in sorted(stint_limit.items())) + " laps."
+            )
+
+    st.subheader("Pace what-if")
+    whatif = metrics.get("whatif")
+    if not whatif:
+        st.info("Run `python -m src.model` to enable the what-if predictor.")
+    else:
+        wi = st.columns(3)
+        wi_compound = wi[0].selectbox("Compound", ["SOFT", "MEDIUM", "HARD"], index=1, key="wi_compound")
+        wi_progress = wi[1].slider("Race progress", 0.05, 0.95, 0.5, 0.05, key="wi_progress")
+        wi_level = wi[2].selectbox("Prediction interval", ["80%", "90%"], index=1, key="wi_level")
+        key = {"80%": "0.8", "90%": "0.9"}[wi_level]
+        half_width = whatif["interval_half_width_s"][key]
+        ages = np.arange(1, 41)
+        centre = predict_linear(whatif["spec"], wi_compound, wi_progress, ages)
+        what_fig = go.Figure()
+        what_fig.add_trace(go.Scatter(
+            x=list(ages) + list(ages[::-1]), y=list(centre + half_width) + list((centre - half_width)[::-1]),
+            fill="toself", fillcolor="rgba(232,0,45,0.18)", line={"width": 0}, hoverinfo="skip", name=f"{wi_level} interval"))
+        what_fig.add_trace(go.Scatter(
+            x=ages, y=centre, mode="lines", name="Predicted pace",
+            line={"color": theme.COMPOUND_COLORS[wi_compound], "width": 3}))
+        what_fig.update_layout(xaxis_title="Tyre age (laps)", yaxis_title="Seconds vs the driver's race median pace")
+        theme.style_fig(what_fig, height=400)
+        st.plotly_chart(what_fig, width="stretch", config={"displayModeBar": False})
+        st.caption(
+            f"Held-out check: the {wi_level} band contained {whatif['interval_coverage'][key]:.1%} of laps from race weekends the model "
+            "never saw. The band is a constant width, so it is wide for a single lap. Compound shifts in this model are small and "
+            "not statistically distinguishable, so read the tyre-age and race-progress effects rather than gaps between compounds."
+        )
+
+# ---------------------------------------------------------------- assistant
+with tab_ask:
+    st.subheader("Ask Pitwall")
+    theme.note(
+        "Ask about tyre degradation, driver comparisons, race summaries or the pace model. The assistant can only quote numbers "
+        "returned by the analysis tools, and every answer is checked for figures that do not appear in them."
+    )
+    config = LLMConfig.from_env()
+    if not config.configured:
+        theme.callout(
+            "<b>No language model configured.</b> Create a <code>.env</code> file in the project root and set "
+            "<code>PITWALL_LLM_API_KEY</code> for a hosted provider, or set <code>PITWALL_LLM_BASE_URL</code> and "
+            "<code>PITWALL_LLM_MODEL</code> for local Ollama. Restart the app after changing the file."
+        )
+    else:
+        if "chat" not in st.session_state:
+            st.session_state.chat = []
+        for turn in st.session_state.chat:
+            with st.chat_message(turn["role"]):
+                st.markdown(turn["content"])
+        st.caption("Try: “Which Ferrari driver degrades the hard tyre more in 2026?” or “Fastest clean lap at Monza in 2025?”")
+        question = st.chat_input("Ask about Ferrari tyre degradation or race pace")
+        if question:
+            history = [{"role": t["role"], "content": t["content"]} for t in st.session_state.chat[-6:]]
+            st.session_state.chat.append({"role": "user", "content": question})
+            with st.chat_message("user"):
+                st.markdown(question)
+            with st.chat_message("assistant"):
+                try:
+                    with st.spinner("Checking the data..."):
+                        result = answer_question(
+                            question, load_pitwall_data(), get_client(), config.model, config.temperature, history)
+                    st.markdown(result.answer)
+                    if not result.grounding.get("grounded", True):
+                        st.warning("Some figures in this answer were not found in the tool results: "
+                                   + ", ".join(f"{v:g}" for v in result.grounding["ungrounded"]))
+                    with st.expander("Tools used"):
+                        st.json([{"tool": c["name"], "arguments": c["arguments"]} for c in result.tool_calls])
+                    st.session_state.chat.append({"role": "assistant", "content": result.answer})
+                except Exception as exc:
+                    st.error(f"The language model call failed: {exc}")
+
+    report = load_metrics_file("assistant_eval.json")
+    if report:
+        with st.expander("Assistant evaluation"):
+            cards = st.columns(4)
+            cards[0].metric("Fully correct", f"{report['overall_pass_rate']:.0%}")
+            cards[1].metric("Right tool", f"{report['tool_accuracy']:.0%}" if report.get("tool_accuracy") is not None else "—")
+            cards[2].metric("Numbers grounded", f"{report['grounded_rate']:.0%}" if report.get("grounded_rate") is not None else "—")
+            cards[3].metric("Cites sources", f"{report['citation_rate']:.0%}" if report.get("citation_rate") is not None else "—")
+            st.caption(f"{report['questions']} questions scored automatically against values computed from the data, model: {report['model']}.")
+            st.dataframe(pd.DataFrame(
+                [{"Category": k, "Fully correct": v} for k, v in report["by_category"].items()]), hide_index=True)
+

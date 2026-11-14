@@ -26,6 +26,8 @@ from sklearn.pipeline import Pipeline
 from sklearn.preprocessing import OneHotEncoder, StandardScaler
 
 from src.cleaning import clean_for_analysis, load_season_laps
+from src.tracking import log_run
+from src.whatif import export_linear_model
 
 ROOT = Path(__file__).resolve().parents[1]
 DATA_DIR = ROOT / "data" / "processed"
@@ -37,6 +39,8 @@ YEARS = (2025, 2026)
 TARGET = "PaceDelta"
 CV_SPLITS = 8
 SIMPLICITY_TOLERANCE = 0.01  # prefer the simpler model if within 1% of the best CV MAE
+WHATIF_MODEL = "Linear: + tyre age"  # interpretable model behind the dashboard's what-if tool
+INTERVAL_LEVELS = (0.8, 0.9)
 
 # name -> (numeric features, categorical features, estimator factory, complexity rank)
 MODEL_SPECS = {
@@ -143,6 +147,53 @@ def legacy_reference() -> dict[str, float]:
     }
 
 
+def ablation(data: pd.DataFrame) -> list[dict]:
+    """Cross-validated MAE of the full boosting model after removing one feature group at a time."""
+    numeric, categorical, factory, _ = MODEL_SPECS["Gradient boosting: + driver & weather"]
+    groups = {
+        "Tyre age": ["TyreLife"],
+        "Race progress / fuel": ["Progress", "LapNumber"],
+        "Compound": ["Compound"],
+        "Driver": ["Driver"],
+        "Weather": ["TrackTempDelta", "Weather_AirTemp", "Weather_Humidity"],
+    }
+    folds = list(GroupKFold(n_splits=min(CV_SPLITS, data["Race"].nunique())).split(data, groups=data["Race"]))
+    actual = data[TARGET].to_numpy()
+
+    def cv_mae(num: list[str], cat: list[str]) -> float:
+        predictions = np.zeros(len(data))
+        for train_idx, test_idx in folds:
+            fitted = make_pipeline(num, cat, factory()).fit(data.iloc[train_idx][num + cat], actual[train_idx])
+            predictions[test_idx] = fitted.predict(data.iloc[test_idx][num + cat])
+        return float(mean_absolute_error(actual, predictions))
+
+    full = cv_mae(numeric, categorical)
+    rows = [{"removed": "Nothing (full model)", "mae": full, "delta_mae": 0.0}]
+    for label, removed in groups.items():
+        mae = cv_mae([f for f in numeric if f not in removed], [f for f in categorical if f not in removed])
+        rows.append({"removed": label, "mae": mae, "delta_mae": mae - full})
+    return rows
+
+
+def prediction_intervals(data: pd.DataFrame, predictions: np.ndarray) -> dict:
+    """Split-conformal style intervals from held-out residuals, plus honest coverage.
+
+    Half-widths are quantiles of absolute held-out errors. Coverage is checked by leaving each race
+    weekend out: its interval comes from the residuals of all the other weekends.
+    """
+    residual = np.abs(data[TARGET].to_numpy() - predictions)
+    races = data["Race"].to_numpy()
+    half_width = {str(level): float(np.quantile(residual, level)) for level in INTERVAL_LEVELS}
+    coverage = {}
+    for level in INTERVAL_LEVELS:
+        hits = np.zeros(len(data), dtype=bool)
+        for race in np.unique(races):
+            mask = races == race
+            hits[mask] = residual[mask] <= np.quantile(residual[~mask], level)
+        coverage[str(level)] = float(hits.mean())
+    return {"half_width_s": half_width, "coverage": coverage}
+
+
 def choose_model(rows: list[dict]) -> str:
     candidates = [row for row in rows if row["name"] != BASELINE]
     best = min(row["mae"] for row in candidates)
@@ -176,6 +227,12 @@ def train() -> None:
             "model_mae": float(mean_absolute_error(data[TARGET].iloc[idx], chosen_predictions[idx])),
         })
 
+    whatif_numeric, whatif_categorical, whatif_factory, _ = MODEL_SPECS[WHATIF_MODEL]
+    whatif_pipeline = make_pipeline(whatif_numeric, whatif_categorical, whatif_factory()).fit(
+        data[whatif_numeric + whatif_categorical], data[TARGET])
+    intervals = prediction_intervals(data, out_of_fold[WHATIF_MODEL])
+    feature_ablation = ablation(data)
+
     metrics = {
         "target": "Lap time minus the driver's median lap time in that race (seconds)",
         "laps": int(len(data)),
@@ -186,6 +243,13 @@ def train() -> None:
         "selected_model": chosen,
         "by_compound": by_compound,
         "legacy": legacy,
+        "ablation": feature_ablation,
+        "whatif": {
+            "model_name": WHATIF_MODEL,
+            "spec": export_linear_model(whatif_pipeline, whatif_numeric, whatif_categorical),
+            "interval_half_width_s": intervals["half_width_s"],
+            "interval_coverage": intervals["coverage"],
+        },
     }
     METRICS_PATH.write_text(json.dumps(metrics, indent=2))
 
@@ -206,6 +270,18 @@ def train() -> None:
         f"\nReference, original absolute-lap-time Random Forest ({YEARS[0]} -> {YEARS[1]}): "
         f"MAE {legacy['random_forest_mae']:.2f}s vs naive circuit mean {legacy['naive_circuit_mean_mae']:.2f}s; "
         f"{legacy['random_forest_mae_unseen_circuits']:.1f}s on {legacy['unseen_circuit_laps']} laps at unseen circuits."
+    )
+    print("\nFeature ablation (boosting model; higher MAE = the removed feature mattered):")
+    for row in feature_ablation:
+        print(f"  remove {row['removed']:<24} MAE {row['mae']:.3f}s  ({row['delta_mae']:+.3f})")
+    print("\nWhat-if intervals (held-out weekends): " + ", ".join(
+        f"{int(float(level) * 100)}%: ±{width:.2f}s, actual coverage {intervals['coverage'][level]:.0%}"
+        for level, width in intervals["half_width_s"].items()))
+    log_run(
+        "pace_model",
+        {"cv_splits": CV_SPLITS, "years": list(YEARS), "selected_model": chosen},
+        {"laps": len(data), "baseline_mae": cv_rows[0]["mae"],
+         **{f"cv_mae[{row['name']}]": round(row["mae"], 4) for row in cv_rows[1:]}},
     )
     print(f"\nSaved model to {MODEL_PATH}\nSaved metrics to {METRICS_PATH}\nSaved predictions to {PREDICTIONS_PATH}")
 

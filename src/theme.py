@@ -151,11 +151,40 @@ h2::before, h3::before {{
   font-variant-numeric: tabular-nums;
 }}
 
+/* Give newer interactive sections the same restrained timing-screen treatment. */
+[data-testid="stDataFrame"], [data-testid="stTable"] {{
+  border: 1px solid light-dark(rgba(0,0,0,0.10), rgba(255,255,255,0.12));
+  border-radius: 5px;
+  overflow: hidden;
+}}
+[data-testid="stChatMessage"] {{
+  border: 1px solid light-dark(rgba(0,0,0,0.08), rgba(255,255,255,0.10));
+  border-left: 3px solid {RED};
+  border-radius: 4px 10px 4px 4px;
+  background: light-dark(rgba(0,0,0,0.02), rgba(255,255,255,0.035));
+}}
+[data-testid="stChatInput"] textarea {{
+  border-color: light-dark(rgba(0,0,0,0.18), rgba(255,255,255,0.20));
+}}
+[data-testid="stButton"] button[kind="primary"],
+[data-testid="stFormSubmitButton"] button[kind="primary"] {{
+  border-color: {RED};
+  background: {RED};
+  color: #FFFFFF;
+  font-family: {FONT_DISPLAY};
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+}}
+[data-testid="stButton"] button, [data-testid="stDownloadButton"] button {{
+  border-radius: 4px 10px 4px 4px;
+}}
+
 .stTabs [data-baseweb="tab-list"] {{ gap: 0.2rem; }}
 .stTabs [data-baseweb="tab"] {{
   text-transform: uppercase; letter-spacing: 0.08em; font-size: 0.78rem;
 }}
 .stTabs [data-baseweb="tab-highlight"] {{ background-color: {RED}; height: 3px; }}
+.stTabs [data-baseweb="tab"] p {{ font-size: inherit; }}
 
 /* Keep dashboard text and controls compact without shrinking chart labels. */
 .stApp [data-testid="stMarkdownContainer"] p,

@@ -26,6 +26,7 @@ import pandas as pd
 from scipy.stats import theilslopes
 
 from src.cleaning import clean_for_analysis
+from src.tracking import log_run
 
 ROOT = Path(__file__).resolve().parents[1]
 DATA_DIR = ROOT / "data" / "processed"
@@ -189,6 +190,8 @@ def fit_season(year: int, rng: np.random.Generator) -> tuple[list[dict[str, obje
             "CleanLaps": int(len(subset)),
             "Stints": int(subset[["EventName", "Driver", "Stint"]].drop_duplicates().shape[0]),
             "Weekends": int(subset["EventName"].nunique()),
+            # Longest realistic stint on this compound (90th percentile of observed stint ends).
+            "TyreAgeP90": float(subset.groupby(["EventName", "Driver", "Stint"])["TyreLife"].max().quantile(0.9)),
             "RaceLapEffectSecondsPerLap": race_lap_effect,
             "Model": (
                 "Huber regression; controls: event-driver fixed effects, race lap, track/air "
@@ -294,6 +297,14 @@ def run() -> None:
         RACE_DRIVER_OUTPUT_PATH, index=False)
     by_driver = summarise_stints(stint_slopes, ["Year", "Driver", "Compound"], seed=43)
     by_driver.to_csv(DRIVER_OUTPUT_PATH, index=False)
+
+    log_run(
+        "degradation",
+        {"years": list(YEARS), "bootstrap_replicates": REGRESSION_BOOTSTRAP_REPLICATES,
+         "cluster_by": CLUSTER_BY, "min_stint_laps": MIN_STINT_LAPS},
+        {f"{row.Year}_{row.Compound}_s_per_lap": round(row.DegradationSecondsPerTyreLap, 4)
+         for row in summary.itertuples()},
+    )
 
     print("\nAdjusted degradation, seconds per additional tyre lap (95% cluster-bootstrap CI):")
     print(summary[[
