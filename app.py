@@ -10,7 +10,8 @@ import plotly.graph_objects as go
 import streamlit as st
 
 from src import theme
-from src.assistant.agent import LLMConfig, answer_question, make_client
+from src.assistant import chat_ui
+from src.assistant.agent import LLMConfig, make_client
 from src.assistant.tools import PitwallData
 from src.tracking import read_runs
 from src.whatif import predict_linear, simulate_strategies
@@ -463,55 +464,4 @@ with tab_lab:
 
 # ---------------------------------------------------------------- assistant
 with tab_ask:
-    st.subheader("Ask Pitwall")
-    theme.note(
-        "Ask about tyre degradation, driver comparisons, race summaries or the pace model. The assistant can only quote numbers "
-        "returned by the analysis tools, and every answer is checked for figures that do not appear in them."
-    )
-    config = LLMConfig.from_env()
-    if not config.configured:
-        theme.callout(
-            "<b>No language model configured.</b> Create a <code>.env</code> file in the project root and set "
-            "<code>PITWALL_LLM_API_KEY</code> for a hosted provider, or set <code>PITWALL_LLM_BASE_URL</code> and "
-            "<code>PITWALL_LLM_MODEL</code> for local Ollama. Restart the app after changing the file."
-        )
-    else:
-        if "chat" not in st.session_state:
-            st.session_state.chat = []
-        for turn in st.session_state.chat:
-            with st.chat_message(turn["role"]):
-                st.markdown(turn["content"])
-        st.caption("Try: “Which Ferrari driver degrades the hard tyre more in 2026?” or “Fastest clean lap at Monza in 2025?”")
-        question = st.chat_input("Ask about Ferrari tyre degradation or race pace")
-        if question:
-            history = [{"role": t["role"], "content": t["content"]} for t in st.session_state.chat[-6:]]
-            st.session_state.chat.append({"role": "user", "content": question})
-            with st.chat_message("user"):
-                st.markdown(question)
-            with st.chat_message("assistant"):
-                try:
-                    with st.spinner("Checking the data..."):
-                        result = answer_question(
-                            question, load_pitwall_data(), get_client(), config.model, config.temperature, history)
-                    st.markdown(result.answer)
-                    if not result.grounding.get("grounded", True):
-                        st.warning("Some figures in this answer were not found in the tool results: "
-                                   + ", ".join(f"{v:g}" for v in result.grounding["ungrounded"]))
-                    with st.expander("Tools used"):
-                        st.json([{"tool": c["name"], "arguments": c["arguments"]} for c in result.tool_calls])
-                    st.session_state.chat.append({"role": "assistant", "content": result.answer})
-                except Exception as exc:
-                    st.error(f"The language model call failed: {exc}")
-
-    report = load_metrics_file("assistant_eval.json")
-    if report:
-        with st.expander("Assistant evaluation"):
-            cards = st.columns(4)
-            cards[0].metric("Fully correct", f"{report['overall_pass_rate']:.0%}")
-            cards[1].metric("Right tool", f"{report['tool_accuracy']:.0%}" if report.get("tool_accuracy") is not None else "—")
-            cards[2].metric("Numbers grounded", f"{report['grounded_rate']:.0%}" if report.get("grounded_rate") is not None else "—")
-            cards[3].metric("Cites sources", f"{report['citation_rate']:.0%}" if report.get("citation_rate") is not None else "—")
-            st.caption(f"{report['questions']} questions scored automatically against values computed from the data, model: {report['model']}.")
-            st.dataframe(pd.DataFrame(
-                [{"Category": k, "Fully correct": v} for k, v in report["by_category"].items()]), hide_index=True)
-
+    chat_ui.render(load_pitwall_data, get_client, load_metrics_file("assistant_eval.json"))

@@ -2,9 +2,10 @@
 
 Run with a configured LLM:   python -m src.assistant.evaluation [--limit N]
 
-Each item checks: did the model call the right tool, does the answer contain the right values, is every
-number in the answer traceable to a tool result (grounding), did it cite sources, and does it decline
-questions the data cannot answer.
+Each item checks: did the model call the right tool(s), does the answer contain the right values, is every
+number in the answer traceable to a tool result (grounding), are sources attached, does it mention the
+uncertainty when an interval includes zero, and does it decline questions the data cannot answer.
+``repair_rate`` is how often the first answer contained an untraceable figure and had to be rewritten.
 """
 
 from __future__ import annotations
@@ -20,9 +21,13 @@ import pandas as pd
 
 from src.assistant.agent import AgentResult, LLMConfig, answer_question, make_client
 from src.assistant.grounding import extract_numbers
-from src.assistant.tools import DATA_DIR, DRIVER_NAMES, FUEL_MEDIAN, PitwallData, fmt_lap
+from src.assistant.tools import DATA_DIR, DRIVER_NAMES, FUEL_MEDIAN, PitwallData, _driver, fmt_lap
 from src.tracking import log_run
 
+UNCERTAINTY_CUES = (
+    "zero", "not clear", "unclear", "uncertain", "cannot rule out", "can't rule out", "not distinguishable",
+    "not clearly", "overlap", "inconclusive", "not reliably", "cannot say", "can't say",
+)
 DECLINE_CUES = (
     "can't", "cannot", "can not", "not available", "don't have", "do not have", "no data", "only cover",
     "outside", "unable", "not able", "isn't available", "not covered", "don't cover", "only have", "not something",
@@ -39,6 +44,7 @@ class EvalItem:
     expect_numbers: list[float] = field(default_factory=list)
     expect_text_any: list[list[str]] = field(default_factory=list)
     expect_decline: bool = False
+    extra_calls: list = field(default_factory=list)  # more (tool, args) pairs the answer needs
 
 
 def build_eval_set(data: PitwallData, seed: int = 7) -> list[EvalItem]:
@@ -83,6 +89,29 @@ def build_eval_set(data: PitwallData, seed: int = 7) -> list[EvalItem]:
                      "get_model_performance", expect_numbers=[chosen["improvement_pct"]]),
         ]
 
+    # Comparison across seasons: needs two tool calls and both numbers.
+    soft = data.estimates[data.estimates["Compound"] == "SOFT"].set_index("Year")["DegradationSecondsPerTyreLap"]
+    if len(soft) == 2:
+        first, second = sorted(soft.index)
+        items.append(EvalItem(
+            "compare-soft-seasons", "comparison", "How did the adjusted soft-tyre degradation change from "
+            f"{first} to {second}?", "get_degradation_estimate", {"year": int(first), "compound": "SOFT"},
+            expect_numbers=[float(soft[first]), float(soft[second])],
+            extra_calls=[("get_degradation_estimate", {"year": int(second), "compound": "SOFT"})]))
+
+    # Uncertainty awareness: pick a driver summary whose interval includes zero.
+    low, high = "FuelCorrectedBootstrap95Lower", "FuelCorrectedBootstrap95Upper"
+    if low in data.by_driver:
+        unsure = data.by_driver[(data.by_driver[low] <= 0) & (data.by_driver[high] >= 0)
+                                & data.by_driver["Compound"].isin(["SOFT", "MEDIUM", "HARD"])]
+        for row in unsure.head(2).itertuples():
+            name = DRIVER_NAMES.get(row.Driver, row.Driver)
+            items.append(EvalItem(
+                f"caveat-{row.Year}-{row.Driver}-{row.Compound}", "uncertainty",
+                f"In {row.Year}, is {name}'s {row.Compound.lower()}-tyre degradation clearly different from zero?",
+                "get_driver_degradation", {"year": int(row.Year), "compound": row.Compound, "driver": row.Driver},
+                expect_text_any=[list(UNCERTAINTY_CUES)]))
+
     items += [
         EvalItem("scope-championship", "out_of_scope", "Who will win the 2027 drivers' championship?", expect_decline=True),
         EvalItem("scope-other-driver", "out_of_scope",
@@ -100,6 +129,9 @@ def _args_match(data: PitwallData, expected: dict, actual: dict) -> bool:
             return False
         if key == "event":
             if data.resolve_event(str(got)) != data.resolve_event(str(value)):
+                return False
+        elif key == "driver":
+            if _driver(str(got)) != _driver(str(value)):
                 return False
         elif str(got).upper() != str(value).upper():
             return False
@@ -119,8 +151,10 @@ def score_item(data: PitwallData, item: EvalItem, result: AgentResult) -> dict:
     answer = result.answer.lower()
     flags: dict[str, bool] = {}
     if item.expect_tool:
-        flags["tool"] = any(c["name"] == item.expect_tool and _args_match(data, item.expect_args, c["arguments"])
-                            for c in result.tool_calls)
+        required = [(item.expect_tool, item.expect_args), *item.extra_calls]
+        flags["tool"] = all(
+            any(c["name"] == tool and _args_match(data, args, c["arguments"]) for c in result.tool_calls)
+            for tool, args in required)
         flags["cited"] = result.cited
     if item.expect_numbers:
         flags["values"] = all(number_in_text(v, result.answer) for v in item.expect_numbers)
@@ -142,7 +176,7 @@ def run_eval(data: PitwallData, client, model: str, temperature: float | None = 
         except Exception as exc:  # keep one failing call from discarding the whole run
             result = AgentResult(answer=f"[error: {exc}]")
         details.append({"id": item.id, "category": item.category, "question": item.question,
-                        "answer": result.answer, "tools": [c["name"] for c in result.tool_calls],
+                        "answer": result.answer, "tools": [c["name"] for c in result.tool_calls], "repaired": result.repaired,
                         **score_item(data, item, result)})
     frame = pd.DataFrame(details)
 
@@ -154,6 +188,7 @@ def run_eval(data: PitwallData, client, model: str, temperature: float | None = 
         "model": model, "questions": len(frame), "overall_pass_rate": float(frame["passed"].mean()),
         "tool_accuracy": rate("tool"), "value_accuracy": rate("values"), "citation_rate": rate("cited"),
         "grounded_rate": rate("grounded"), "decline_rate": rate("declined"),
+        "repair_rate": rate("repaired"),
         "by_category": frame.groupby("category")["passed"].mean().round(3).to_dict(),
         "details": details,
     }
@@ -174,7 +209,7 @@ def main() -> None:
     log_run("assistant_eval", {"model": config.model, "questions": report["questions"]},
             {k: report[k] for k in ("overall_pass_rate", "tool_accuracy", "value_accuracy", "grounded_rate", "citation_rate")})
     print(f"Model {config.model}: {report['overall_pass_rate']:.0%} of {report['questions']} questions fully correct")
-    for name in ("tool_accuracy", "value_accuracy", "citation_rate", "grounded_rate", "decline_rate"):
+    for name in ("tool_accuracy", "value_accuracy", "citation_rate", "grounded_rate", "decline_rate", "repair_rate"):
         if report[name] is not None:
             print(f"  {name.replace('_', ' '):<16} {report[name]:.0%}")
     for category, value in report["by_category"].items():

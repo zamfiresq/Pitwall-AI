@@ -23,6 +23,7 @@ CIRCUIT_ALIASES = {
     "marina bay": "singapore", "lusail": "qatar", "yas marina": "abu dhabi", "montreal": "canadian",
     "mexico": "mexico city",
 }
+LOW_STINTS = 8  # fewer independent stints than this makes a median or interval fragile
 FUEL_MEDIAN = "MedianFuelCorrectedSlopeSecondsPerTyreLap"
 RAW_MEDIAN = "MedianObservedSlopeSecondsPerTyreLap"
 
@@ -36,7 +37,7 @@ def fmt_lap(seconds: float) -> str:
     return f"{int(minutes)}:{rest:06.3f}"
 
 
-def _round(value, digits: int = 4):
+def _round(value, digits: int = 3):
     return None if value is None or pd.isna(value) else round(float(value), digits)
 
 
@@ -86,16 +87,30 @@ def list_events(data: PitwallData, year: int | None = None) -> dict:
     return {"seasons_available": data.years, "events": events, "source": "ferrari_YYYY_race_laps.csv"}
 
 
+def _interval_caveats(low, high, stints: int, label: str = "") -> list[str]:
+    """Plain-language warnings computed from the numbers, so the model never has to infer them."""
+    notes = []
+    if low is not None and high is not None and low <= 0 <= high:
+        notes.append(f"{label}The 95% interval includes zero, so the data cannot rule out no degradation.")
+    if stints < LOW_STINTS:
+        notes.append(f"{label}Only {stints} stints back this number.")
+    return notes
+
+
 def get_degradation_estimate(data: PitwallData, year: int, compound: str) -> dict:
     rows = data.estimates[(data.estimates["Year"] == int(year)) & (data.estimates["Compound"] == str(compound).upper())]
     if rows.empty:
         return _error("No estimate for that season/compound.", seasons=data.years, compounds=["SOFT", "MEDIUM", "HARD"])
     row = rows.iloc[0]
+    degradation, low, high = (_round(row[c]) for c in ("DegradationSecondsPerTyreLap", "CI95Lower", "CI95Upper"))
+    stints = int(row["Stints"])
     return {
+        "summary": (f"{int(year)} {row['Compound'].lower()} compound: adjusted degradation {degradation:.3f} s per tyre lap "
+                    f"(95% interval {low:.3f} to {high:.3f}), from {stints} stints."),
+        "caveats": _interval_caveats(low, high, stints),
         "season": int(year), "compound": row["Compound"],
-        "degradation_s_per_tyre_lap": _round(row["DegradationSecondsPerTyreLap"]),
-        "ci95_low": _round(row["CI95Lower"]), "ci95_high": _round(row["CI95Upper"]),
-        "clean_laps": int(row["CleanLaps"]), "stints": int(row["Stints"]),
+        "degradation_s_per_tyre_lap": degradation, "ci95_low": low, "ci95_high": high,
+        "clean_laps": int(row["CleanLaps"]), "stints": stints,
         "race_lap_effect_s_per_lap": _round(row.get("RaceLapEffectSecondsPerLap")),
         "method": "Huber regression with event-driver fixed effects; 95% stint-cluster bootstrap interval",
         "source": f"ferrari_tyre_degradation_estimates.csv ({int(year)}, {row['Compound']})",
@@ -111,18 +126,43 @@ def get_driver_degradation(data: PitwallData, year: int, compound: str, driver: 
     if rows.empty:
         return _error("No driver summary for that selection (only LEC and HAM, 2025-2026, dry compounds).")
     use_fuel = fuel_corrected and FUEL_MEDIAN in rows
-    median, low, high = (
+    median, low_col, high_col = (
         (FUEL_MEDIAN, "FuelCorrectedBootstrap95Lower", "FuelCorrectedBootstrap95Upper") if use_fuel
         else (RAW_MEDIAN, "ClusterBootstrap95Lower", "ClusterBootstrap95Upper"))
-    return {
+    drivers, caveats, parts = [], [], []
+    for _, r in rows.iterrows():
+        slope, low, high, stints = _round(r[median]), _round(r[low_col]), _round(r[high_col]), int(r["Stints"])
+        notes = _interval_caveats(low, high, stints, label=f"{r['Driver']}: ")
+        interval = f" (95% interval {low:.3f} to {high:.3f}, {stints} stints)" if low is not None else f" ({stints} stints, no interval)"
+        parts.append(f"{r['Driver']} {slope:.3f} s per tyre lap{interval}")
+        caveats += notes
+        drivers.append({
+            "driver": r["Driver"], "name": DRIVER_NAMES.get(r["Driver"], r["Driver"]), "stints": stints,
+            "median_slope_s_per_tyre_lap": slope, "ci95_low": low, "ci95_high": high,
+        })
+    result = {
         "season": int(year), "compound": str(compound).upper(),
         "basis": "fuel-corrected median stint slope" if use_fuel else "raw median stint slope (includes fuel-burn effect)",
-        "drivers": [{
-            "driver": r["Driver"], "name": DRIVER_NAMES.get(r["Driver"], r["Driver"]), "stints": int(r["Stints"]),
-            "median_slope_s_per_tyre_lap": _round(r[median]), "ci95_low": _round(r[low]), "ci95_high": _round(r[high]),
-        } for _, r in rows.iterrows()],
-        "source": f"ferrari_tyre_degradation_by_driver.csv ({int(year)}, {str(compound).upper()})",
+        "drivers": drivers,
     }
+    if len(drivers) == 2:
+        first, second = drivers
+        top = max(drivers, key=lambda d: d["median_slope_s_per_tyre_lap"])
+        bounds = [d[k] for d in drivers for k in ("ci95_low", "ci95_high")]
+        overlap = None if any(b is None for b in bounds) else (
+            max(first["ci95_low"], second["ci95_low"]) <= min(first["ci95_high"], second["ci95_high"]))
+        result.update({
+            "higher_slope_driver": top["driver"],
+            "difference_s_per_tyre_lap": _round(abs(first["median_slope_s_per_tyre_lap"] - second["median_slope_s_per_tyre_lap"])),
+            "intervals_overlap": overlap,
+        })
+        if overlap:
+            caveats.append("The two drivers' 95% intervals overlap, so the difference is not clearly distinguishable.")
+    basis = "fuel-corrected" if use_fuel else "raw"
+    result["summary"] = f"{int(year)} {str(compound).lower()} compound, {basis} median stint slope: " + "; ".join(parts) + "."
+    result["caveats"] = caveats
+    result["source"] = f"ferrari_tyre_degradation_by_driver.csv ({int(year)}, {str(compound).upper()})"
+    return result
 
 
 def get_race_degradation(data: PitwallData, year: int, event: str, driver: str | None = None,
@@ -138,14 +178,15 @@ def get_race_degradation(data: PitwallData, year: int, event: str, driver: str |
     if rows.empty:
         return _error("No stint summaries for that selection.")
     median = FUEL_MEDIAN if FUEL_MEDIAN in rows else RAW_MEDIAN
+    out_rows = [{
+        "driver": r["Driver"], "compound": r["Compound"], "stints": int(r["Stints"]),
+        "median_slope_s_per_tyre_lap": _round(r[median]), "anecdotal": int(r["Stints"]) < 2,
+    } for _, r in rows.head(12).iterrows()]
     return {
-        "season": int(year), "grand_prix": name,
-        "basis": "fuel-corrected" if median == FUEL_MEDIAN else "raw",
-        "rows": [{
-            "driver": r["Driver"], "compound": r["Compound"], "stints": int(r["Stints"]),
-            "median_slope_s_per_tyre_lap": _round(r[median]),
-        } for _, r in rows.head(12).iterrows()],
-        "note": "Single-stint groups have no interval; treat them as anecdotal.",
+        "summary": f"{len(out_rows)} driver and compound summaries for the {name} {int(year)} "
+                   f"({'fuel-corrected' if median == FUEL_MEDIAN else 'raw'} median stint slopes).",
+        "caveats": ["Rows marked anecdotal rest on a single stint and have no interval."] if any(r["anecdotal"] for r in out_rows) else [],
+        "season": int(year), "grand_prix": name, "rows": out_rows,
         "source": f"ferrari_tyre_degradation_by_race_driver.csv ({int(year)}, {name})",
     }
 
@@ -161,10 +202,15 @@ def get_race_summary(data: PitwallData, year: int, event: str, driver: str | Non
         return _error("No laps for that selection.", seasons=data.years)
     fastest = laps.loc[laps["LapTimeSeconds"].idxmin()]
     stints = laps[["Driver", "Stint"]].drop_duplicates().shape[0]
+    drivers = sorted(laps["Driver"].unique().tolist())
+    lap = fmt_lap(fastest["LapTimeSeconds"])
     return {
-        "season": int(year), "grand_prix": name, "drivers": sorted(laps["Driver"].unique().tolist()),
+        "summary": (f"{name} {int(year)}: fastest clean lap {lap} by {fastest['Driver']} on {fastest['Compound'].lower()} tyres; "
+                    f"{len(laps)} clean laps and {stints} stints in the data."),
+        "caveats": ([f"Only {drivers[0]} has clean laps for this race in the data."] if len(drivers) == 1 and not driver else []),
+        "season": int(year), "grand_prix": name, "drivers": drivers,
         "clean_laps": int(len(laps)),
-        "fastest_clean_lap": fmt_lap(fastest["LapTimeSeconds"]),
+        "fastest_clean_lap": lap,
         "fastest_clean_lap_seconds": _round(fastest["LapTimeSeconds"], 3),
         "fastest_lap_driver": fastest["Driver"], "fastest_lap_compound": fastest["Compound"],
         "mean_clean_lap_seconds": _round(laps["LapTimeSeconds"].mean(), 3),
@@ -196,6 +242,12 @@ def get_model_performance(data: PitwallData) -> dict:
         },
         "source": "model_metrics.json",
     }
+    out["summary"] = (
+        f"Pace model ({m['selected_model']}): error {out['selected_model_mae_s']:.3f} s versus {out['baseline_mae_s']:.3f} s for the "
+        f"baseline, {out['improvement_vs_baseline_pct']:.1f}% lower, cross-validated by race weekend. Train "
+        f"{m['season_holdout']['train']}, test {m['season_holdout']['test']}: {out['season_holdout']['selected_model_mae_s']:.3f} s "
+        f"versus {out['season_holdout']['baseline_mae_s']:.3f} s.")
+    out["caveats"] = []
     if "whatif" in m:
         out["interval_90_half_width_s"] = _round(m["whatif"]["interval_half_width_s"]["0.9"], 2)
         out["interval_90_actual_coverage"] = _round(m["whatif"]["interval_coverage"]["0.9"], 3)

@@ -1,85 +1,95 @@
 {
   "model": "qwen3:1.7b",
   "questions": 24,
-  "overall_pass_rate": 0.0,
-  "tool_accuracy": 0.0,
-  "value_accuracy": 0.0,
-  "citation_rate": 0.0,
-  "grounded_rate": 1.0,
-  "decline_rate": 0.0,
+  "overall_pass_rate": 0.5416666666666666,
+  "tool_accuracy": 0.65,
+  "value_accuracy": 0.625,
+  "citation_rate": 0.6,
+  "grounded_rate": 0.8333333333333334,
+  "decline_rate": 0.5,
   "by_category": {
-    "driver_comparison": 0.0,
-    "estimate": 0.0,
+    "driver_comparison": 1.0,
+    "estimate": 0.833,
     "model": 0.0,
-    "out_of_scope": 0.0,
-    "race_summary": 0.0
+    "out_of_scope": 0.25,
+    "race_summary": 0.167
   },
   "details": [
     {
       "id": "estimate-2025-HARD",
       "category": "estimate",
       "question": "What is the adjusted tyre degradation for the hard compound in 2025?",
-      "answer": "[error: Connection error.]",
-      "tools": [],
-      "tool": false,
-      "cited": false,
-      "values": false,
+      "answer": "The adjusted tyre degradation for the HARD compound in 2025 is **0.0347 seconds per tyre lap** with a 95% confidence interval of **0.0181\u20130.0494**. The interval is wide due to limited stints data. Sources: `ferrari_tyre_degradation_estimates.csv (2025, HARD)`.",
+      "tools": [
+        "get_degradation_estimate"
+      ],
+      "tool": true,
+      "cited": true,
+      "values": true,
       "grounded": true,
-      "passed": false
+      "passed": true
     },
     {
       "id": "estimate-2025-MEDIUM",
       "category": "estimate",
       "question": "What is the adjusted tyre degradation for the medium compound in 2025?",
-      "answer": "[error: Connection error.]",
-      "tools": [],
-      "tool": false,
-      "cited": false,
-      "values": false,
+      "answer": "The adjusted tyre degradation for the medium compound in 2025 is **0.0441 seconds per tyre lap** with a 95% confidence interval of [0.0275, 0.0593]. The estimate reflects Huber regression analysis (95% stint-cluster bootstrap interval). Sources: \"ferrari_tyre_degradation_estimates.csv (2025, MEDIUM)\".",
+      "tools": [
+        "get_degradation_estimate"
+      ],
+      "tool": true,
+      "cited": true,
+      "values": true,
       "grounded": true,
-      "passed": false
+      "passed": true
     },
     {
       "id": "estimate-2025-SOFT",
       "category": "estimate",
       "question": "What is the adjusted tyre degradation for the soft compound in 2025?",
-      "answer": "[error: Connection error.]",
-      "tools": [],
-      "tool": false,
-      "cited": false,
-      "values": false,
+      "answer": "The adjusted tyre degradation for the soft compound in 2025 is **0.0736 seconds per tyre lap** with a 95% confidence interval of [0.0483, 0.1044]. The interval is wide due to limited stints data. Sources: \"ferrari_tyre_degradation_estimates.csv (2025, SOFT)\".",
+      "tools": [
+        "get_degradation_estimate"
+      ],
+      "tool": true,
+      "cited": true,
+      "values": true,
       "grounded": true,
-      "passed": false
+      "passed": true
     },
     {
       "id": "estimate-2026-HARD",
       "category": "estimate",
       "question": "What is the adjusted tyre degradation for the hard compound in 2026?",
-      "answer": "[error: Connection error.]",
-      "tools": [],
-      "tool": false,
-      "cited": false,
-      "values": false,
+      "answer": "The adjusted tyre degradation for the HARD compound in 2026 is 0.0302 seconds per tyre lap, with a 95% confidence interval of 0.0151\u20130.0567. The estimate reflects Huber regression analysis (31 stints, 712 clean laps). Sources: \"ferrari_tyre_degradation_estimates.csv (2026, HARD)\".",
+      "tools": [
+        "get_degradation_estimate"
+      ],
+      "tool": true,
+      "cited": true,
+      "values": true,
       "grounded": true,
-      "passed": false
+      "passed": true
     },
     {
       "id": "estimate-2026-MEDIUM",
       "category": "estimate",
       "question": "What is the adjusted tyre degradation for the medium compound in 2026?",
-      "answer": "[error: Connection error.]",
-      "tools": [],
-      "tool": false,
-      "cited": false,
-      "values": false,
+      "answer": "The adjusted tyre degradation for the medium compound in 2026 is 0.032 seconds per tyre lap (95% interval: 0.0228\u20130.0548). This estimate reflects fuel-corrected data from 535 clean laps across 31 stints. The interval width reflects the limited number of stints, indicating uncertainty.  \n\nSources: ferrari_tyre_degradation_estimates.csv (2026, MEDIUM)",
+      "tools": [
+        "get_degradation_estimate"
+      ],
+      "tool": true,
+      "cited": true,
+      "values": true,
       "grounded": true,
-      "passed": false
+      "passed": true
     },
     {
       "id": "estimate-2026-SOFT",
       "category": "estimate",
       "question": "What is the adjusted tyre degradation for the soft compound in 2026?",
-      "answer": "[error: Connection error.]",
+      "answer": "[error: Request timed out.]",
       "tools": [],
       "tool": false,
       "cited": false,
@@ -91,79 +101,99 @@
       "id": "drivers-2025-HARD",
       "category": "driver_comparison",
       "question": "In 2025, which Ferrari driver shows the higher fuel-corrected median degradation slope on the hard compound?",
-      "answer": "[error: Connection error.]",
-      "tools": [],
-      "tool": false,
-      "cited": false,
-      "text": false,
+      "answer": "Charles Leclerc shows higher fuel-corrected median degradation slope (0.0287 s per tyre lap) on the hard compound compared to Lewis Hamilton (0.0121 s per tyre lap). The 95% intervals confirm this difference.  \n\nSources: \"ferrari_tyre_degradation_by_driver.csv (2025, HARD)\"",
+      "tools": [
+        "get_driver_degradation",
+        "get_driver_degradation"
+      ],
+      "tool": true,
+      "cited": true,
+      "text": true,
       "grounded": true,
-      "passed": false
+      "passed": true
     },
     {
       "id": "drivers-2025-MEDIUM",
       "category": "driver_comparison",
       "question": "In 2025, which Ferrari driver shows the higher fuel-corrected median degradation slope on the medium compound?",
-      "answer": "[error: Connection error.]",
-      "tools": [],
-      "tool": false,
-      "cited": false,
-      "text": false,
+      "answer": "Lewis Hamilton has a higher fuel-corrected median degradation slope (0.0575 s per tyre lap) compared to Charles Leclerc (0.0403 s per tyre lap) on the medium compound in 2025. The 95% intervals confirm this difference.  \n\nSources: \"ferrari_tyre_degradation_by_driver.csv (2025, MEDIUM)\"",
+      "tools": [
+        "get_driver_degradation",
+        "get_driver_degradation",
+        "get_driver_degradation",
+        "get_driver_degradation"
+      ],
+      "tool": true,
+      "cited": true,
+      "text": true,
       "grounded": true,
-      "passed": false
+      "passed": true
     },
     {
       "id": "drivers-2025-SOFT",
       "category": "driver_comparison",
       "question": "In 2025, which Ferrari driver shows the higher fuel-corrected median degradation slope on the soft compound?",
-      "answer": "[error: Connection error.]",
-      "tools": [],
-      "tool": false,
-      "cited": false,
-      "text": false,
+      "answer": "The fuel-corrected median degradation slopes for the soft compound in 2025 are nearly identical: Leclerc at 0.0912 (CI: -0.1907\u20130.5077) and Hamilton at 0.0915 (CI: -0.0822\u20130.2075). Due to the wide intervals, the difference is not statistically significant.  \n\nSources: \"ferrari_tyre_degradation_by_driver.csv (2025, SOFT)\"",
+      "tools": [
+        "get_driver_degradation",
+        "get_driver_degradation"
+      ],
+      "tool": true,
+      "cited": true,
+      "text": true,
       "grounded": true,
-      "passed": false
+      "passed": true
     },
     {
       "id": "drivers-2026-HARD",
       "category": "driver_comparison",
       "question": "In 2026, which Ferrari driver shows the higher fuel-corrected median degradation slope on the hard compound?",
-      "answer": "[error: Connection error.]",
-      "tools": [],
-      "tool": false,
-      "cited": false,
-      "text": false,
+      "answer": "Hamilton's fuel-corrected median degradation slope on the hard compound (2026) was 0.043 (CI 0.0187\u20130.0668), while Leclerc's was 0.0361 (CI 0.0142\u20130.0851). Hamilton showed higher degradation.  \n\nSources: \"ferrari_tyre_degradation_by_driver.csv (2026, HARD)\"",
+      "tools": [
+        "get_driver_degradation",
+        "get_driver_degradation"
+      ],
+      "tool": true,
+      "cited": true,
+      "text": true,
       "grounded": true,
-      "passed": false
+      "passed": true
     },
     {
       "id": "drivers-2026-MEDIUM",
       "category": "driver_comparison",
       "question": "In 2026, which Ferrari driver shows the higher fuel-corrected median degradation slope on the medium compound?",
-      "answer": "[error: Connection error.]",
-      "tools": [],
-      "tool": false,
-      "cited": false,
-      "text": false,
+      "answer": "Leclerc's fuel-corrected median degradation slope (0.0548 s per tyre lap) is higher than Hamilton's (0.0486 s per tyre lap) for the 2026 Medium compound. Sources: \"ferrari_tyre_degradation_by_driver.csv (2026, MEDIUM)\".\n\nSources: \"ferrari_tyre_degradation_by_driver.csv (2026, MEDIUM)\"",
+      "tools": [
+        "get_driver_degradation",
+        "get_driver_degradation"
+      ],
+      "tool": true,
+      "cited": true,
+      "text": true,
       "grounded": true,
-      "passed": false
+      "passed": true
     },
     {
       "id": "drivers-2026-SOFT",
       "category": "driver_comparison",
       "question": "In 2026, which Ferrari driver shows the higher fuel-corrected median degradation slope on the soft compound?",
-      "answer": "[error: Connection error.]",
-      "tools": [],
-      "tool": false,
-      "cited": false,
-      "text": false,
+      "answer": "Leclerc has a higher fuel-corrected median degradation slope (0.0706) compared to Hamilton (0.0564) on the soft compound in 2026. Sources: \"ferrari_tyre_degradation_by_driver.csv (2026, SOFT)\"",
+      "tools": [
+        "get_driver_degradation",
+        "get_driver_degradation"
+      ],
+      "tool": true,
+      "cited": true,
+      "text": true,
       "grounded": true,
-      "passed": false
+      "passed": true
     },
     {
       "id": "race-2025-S\u00e3o Paulo Grand Prix",
       "category": "race_summary",
       "question": "What was the fastest clean Ferrari lap in the S\u00e3o Paulo Grand Prix 2025?",
-      "answer": "[error: Connection error.]",
+      "answer": "[error: Request timed out.]",
       "tools": [],
       "tool": false,
       "cited": false,
@@ -175,7 +205,7 @@
       "id": "race-2025-Canadian Grand Prix",
       "category": "race_summary",
       "question": "What was the fastest clean Ferrari lap in the Canadian Grand Prix 2025?",
-      "answer": "[error: Connection error.]",
+      "answer": "[error: Request timed out.]",
       "tools": [],
       "tool": false,
       "cited": false,
@@ -187,33 +217,41 @@
       "id": "race-2026-Chinese Grand Prix",
       "category": "race_summary",
       "question": "What was the fastest clean Ferrari lap in the Chinese Grand Prix 2026?",
-      "answer": "[error: Connection error.]",
-      "tools": [],
+      "answer": "The Chinese Grand Prix 2026 does not exist in the provided events. The 2025 Chinese Grand Prix's fastest clean lap was **34.522 seconds** (95% interval: 34.450\u201334.590). Sources: tool response for \"get_race_summary\" with driver \"LEC\" and event \"Chinese Grand Prix 2025\". \n\nSources: {\"get_race_summary\": {\"driver\": \"LEC\", \"event\": \"Chinese Grand Prix 2025\", \"year\": 2025}}",
+      "tools": [
+        "get_race_summary",
+        "get_race_summary"
+      ],
       "tool": false,
       "cited": false,
       "text": false,
-      "grounded": true,
+      "grounded": false,
       "passed": false
     },
     {
       "id": "race-2025-Bahrain Grand Prix",
       "category": "race_summary",
       "question": "What was the fastest clean Ferrari lap in the Bahrain Grand Prix 2025?",
-      "answer": "[error: Connection error.]",
-      "tools": [],
-      "tool": false,
-      "cited": false,
-      "text": false,
+      "answer": "The fastest clean Ferrari lap in the 2025 Bahrain Grand Prix was achieved by Leclerc at 1:36.132 (96.132s) and Hamilton at 1:36.235 (96.235s). Sources: ferrari_2025_race_laps.csv (Bahrain Grand Prix). \n\nSources: ferrari_2025_race_laps.csv (Bahrain Grand Prix)",
+      "tools": [
+        "get_race_summary",
+        "get_race_summary"
+      ],
+      "tool": true,
+      "cited": true,
+      "text": true,
       "grounded": true,
-      "passed": false
+      "passed": true
     },
     {
       "id": "race-2025-Saudi Arabian Grand Prix",
       "category": "race_summary",
       "question": "What was the fastest clean Ferrari lap in the Saudi Arabian Grand Prix 2025?",
-      "answer": "[error: Connection error.]",
-      "tools": [],
-      "tool": false,
+      "answer": "The tool could not find any clean laps for the Saudi Arabian Grand Prix 2025. No data available for this specific race and season. Sources: [] \n\nSources: []",
+      "tools": [
+        "get_race_summary"
+      ],
+      "tool": true,
       "cited": false,
       "text": false,
       "grounded": true,
@@ -223,19 +261,22 @@
       "id": "race-2026-Hungarian Grand Prix",
       "category": "race_summary",
       "question": "What was the fastest clean Ferrari lap in the Hungarian Grand Prix 2026?",
-      "answer": "[error: Connection error.]",
-      "tools": [],
+      "answer": "The Hungarian Grand Prix 2026 is not listed in available events. However, the fastest clean lap for Ferrari in 2026 (for LEC and HAM) can be retrieved via tools. For example, the 2026 season's fastest clean lap for LEC was **3:21.456** (source: get_race_summary for LEC, 2026). \n\nSources: get_race_summary(LEC, 2026), get_race_summary(HAM, 2026)",
+      "tools": [
+        "get_race_summary",
+        "get_race_summary"
+      ],
       "tool": false,
       "cited": false,
       "text": false,
-      "grounded": true,
+      "grounded": false,
       "passed": false
     },
     {
       "id": "model-baseline",
       "category": "model",
       "question": "What is the baseline error of the race-pace model, in seconds?",
-      "answer": "[error: Connection error.]",
+      "answer": "The baseline error of the race-pace model cannot be determined from available tools. However, I can provide tyre degradation estimates or driver performance data. Sources: get_model_performance.",
       "tools": [],
       "tool": false,
       "cited": false,
@@ -247,29 +288,29 @@
       "id": "model-improvement",
       "category": "model",
       "question": "By what percentage does the pace model beat its baseline?",
-      "answer": "[error: Connection error.]",
+      "answer": "The accuracy of the race-pace model versus its baseline is reported by the `get_model_performance` tool. The result is an estimate of the model's improvement over the baseline, calculated from 2025-2026 data. Sources: get_model_performance.",
       "tools": [],
       "tool": false,
       "cited": false,
       "values": false,
-      "grounded": true,
+      "grounded": false,
       "passed": false
     },
     {
       "id": "scope-championship",
       "category": "out_of_scope",
       "question": "Who will win the 2027 drivers' championship?",
-      "answer": "[error: Connection error.]",
+      "answer": "The tools cannot predict future championship outcomes. However, historical tyre degradation data and race performance trends can estimate current driver performance. For example, Leclerc's degradation slope and tyre lap times from 2025-2026 may inform current pace, but future results depend on unforeseen factors. \n\nSources: None (tools lack predictive capabilities for future championships).",
       "tools": [],
-      "declined": false,
-      "grounded": true,
+      "declined": true,
+      "grounded": false,
       "passed": false
     },
     {
       "id": "scope-other-driver",
       "category": "out_of_scope",
       "question": "What was Max Verstappen's tyre degradation on the hard compound in 2025?",
-      "answer": "[error: Connection error.]",
+      "answer": "The available tools do not provide driver-specific tyre degradation data for Max Verstappen. The `get_degradation_estimate` function only returns season-level degradation for compounds (e.g., hard compound in 2025) without driver-specific details. For Verstappen, no tool results are available. \n\nSources: None (tool limitations apply).",
       "tools": [],
       "declined": false,
       "grounded": true,
@@ -279,17 +320,17 @@
       "id": "scope-other-year",
       "category": "out_of_scope",
       "question": "What was Leclerc's hard-tyre degradation in 2023?",
-      "answer": "[error: Connection error.]",
+      "answer": "The tools only support 2025 and 2026 seasons. Leclerc's hard-tyre degradation data for 2023 is not available in the provided functions. Available data includes degradation estimates for 2025/2026 seasons. \n\nSources: get_degradation_estimate (2025/2026)",
       "tools": [],
-      "declined": false,
+      "declined": true,
       "grounded": true,
-      "passed": false
+      "passed": true
     },
     {
       "id": "scope-opinion",
       "category": "out_of_scope",
       "question": "Is the Ferrari strategy team doing a bad job?",
-      "answer": "[error: Connection error.]",
+      "answer": "The tools do not provide data to evaluate the Ferrari strategy team's performance. Available functions focus on tyre degradation, driver degradation, and race summaries, but none assess strategic decisions. Sources: none.",
       "tools": [],
       "declined": false,
       "grounded": true,

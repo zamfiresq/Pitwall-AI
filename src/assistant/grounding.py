@@ -1,4 +1,8 @@
-"""Check that numbers in an answer come from tool results, to catch invented figures."""
+"""Check that numbers in an answer come from tool results, to catch invented figures.
+
+Limit: this proves a figure exists in the tool results, not that it is attached to the right item (a model could
+quote driver A's slope for driver B). The evaluation set checks attribution on known questions.
+"""
 
 from __future__ import annotations
 
@@ -44,14 +48,13 @@ def _flatten(value, out: list[float]) -> None:
 
 
 def source_numbers(results: list[dict]) -> list[float]:
+    """Every number the tools returned. Derived figures (differences, ratios) are deliberately not accepted:
+    allowing differences between any two numbers let about a quarter of random invented figures through.
+    Tools precompute the comparisons worth quoting (for example ``difference_s_per_tyre_lap``)."""
     numbers: list[float] = []
     for result in results:
         _flatten(result, numbers)
-    unique = sorted(set(numbers))
-    # Allow simple derived quantities, e.g. the difference between two reported slopes.
-    pool = unique[:80]
-    unique += [abs(a - b) for i, a in enumerate(pool) for b in pool[i + 1:]]
-    return unique
+    return sorted(set(numbers))
 
 
 def matches(value: float, decimals: int, candidates: list[float]) -> bool:

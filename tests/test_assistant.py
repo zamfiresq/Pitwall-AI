@@ -10,7 +10,7 @@ from types import SimpleNamespace
 from src.assistant.agent import answer_question
 from src.assistant.evaluation import EvalItem, build_eval_set, number_in_text, run_eval, score_item
 from src.assistant.grounding import check_grounding, cites_source, extract_numbers
-from src.assistant.tools import DATA_DIR, PitwallData, call_tool, fmt_lap
+from src.assistant.tools import DATA_DIR, PitwallData, _interval_caveats, call_tool, fmt_lap
 
 
 def load_data():
@@ -37,14 +37,11 @@ class OracleClient:
         tool_messages = [m for m in messages if m["role"] == "tool"]
         if not tool_messages:
             if item.expect_tool:
-                return message(calls=[(item.expect_tool, item.expect_args)])
+                return message(calls=[(item.expect_tool, item.expect_args), *item.extra_calls])
             return message("I can't answer that; I only cover Ferrari tyre degradation and pace for 2025 and 2026.")
-        result = json.loads(tool_messages[-1]["content"])
-        lines = [f"{k}: {v}" for k, v in _leaves(result)]
-        if result.get("drivers") and isinstance(result["drivers"][0], dict) and len(result["drivers"]) > 1:
-            top = max(result["drivers"], key=lambda d: d["median_slope_s_per_tyre_lap"])
-            lines.append(f"Higher slope: {top['name']}")
-        return message("\n".join(lines) + f"\nSources: {result['source']}")
+        results = [json.loads(m["content"]) for m in tool_messages]
+        lines = [f"{k}: {v}" for result in results for k, v in _leaves(result)]
+        return message("\n".join(lines) + "\nSources: " + "; ".join(r["source"] for r in results))
 
 
 def _leaves(value, prefix=""):
@@ -99,11 +96,13 @@ def test_agent_recovers_from_a_bad_tool_call():
 
 
 def test_grounding_uses_written_precision_and_derived_values():
-    results = [{"a": 0.0346, "b": 0.0227, "lap": "1:23.456", "n": 31, "pct": 28.3, "source": "f.csv (2026)"}]
+    results = [{"a": 0.0346, "b": 0.0227, "gap": 0.012, "lap": "1:23.456", "n": 31, "pct": 28.3, "source": "f.csv (2026)"}]
     assert check_grounding("Slope 0.035 s per lap over 31 stints.", results)["grounded"]
-    assert check_grounding("The gap is 0.012.", results)["grounded"]            # 0.0346 - 0.0227
+    assert check_grounding("The gap is 0.012.", results)["grounded"]            # precomputed by the tool
+    assert not check_grounding("The gap is 0.020.", results)["grounded"]       # 0.0346 - 0.0227 = 0.0119, not accepted
     assert check_grounding("Best lap 1:23.456, an improvement of 28%.", results)["grounded"]
     assert check_grounding("Slope 0.081 s per lap.", results)["ungrounded"] == [0.081]
+    assert check_grounding("The gap is 0.0119.", results)["ungrounded"] == [0.0119]  # derived by the model, so unsupported
     assert check_grounding("Slope 0.035 (95% interval, ci95_low) over 31 stints.", results)["grounded"]
     assert check_grounding("The 90% interval is wide.", results)["grounded"]
     assert not check_grounding("The error is 90 s.", results)["grounded"]  # a bare 90 is still checked
@@ -125,3 +124,50 @@ def test_tools_resolve_circuits_and_report_errors():
     estimate = call_tool(data, "get_degradation_estimate", {"year": 2026, "compound": "hard"})
     assert estimate["ci95_low"] < estimate["degradation_s_per_tyre_lap"] < estimate["ci95_high"]
     assert fmt_lap(83.456) == "1:23.456"
+
+
+def test_unsupported_figure_triggers_one_repair_pass():
+    data = load_data()
+    if data is None:
+        return
+    script = iter([
+        message(calls=[("get_degradation_estimate", {"year": 2025, "compound": "HARD"})]),
+        message("Hard lost 0.081 s per tyre lap."),          # figure not in the tool result
+        message("Hard lost 0.035 s per tyre lap."),          # repaired
+    ])
+    client = SimpleNamespace(chat=SimpleNamespace(completions=SimpleNamespace(create=lambda **_: next(script))))
+    result = answer_question("hard degradation 2025?", data, client, "m")
+    assert result.repaired and result.grounding["grounded"] and "0.035" in result.answer
+
+
+def test_good_answer_is_not_repaired_and_sources_come_from_code():
+    data = load_data()
+    if data is None:
+        return
+    script = iter([
+        message(calls=[("get_degradation_estimate", {"year": 2025, "compound": "HARD"})]),
+        message("Hard lost 0.035 s per tyre lap.\nSources: made_up_file.csv"),
+    ])
+    client = SimpleNamespace(chat=SimpleNamespace(completions=SimpleNamespace(create=lambda **_: next(script))))
+    result = answer_question("hard degradation 2025?", data, client, "m")
+    assert not result.repaired and "made_up_file" not in result.answer
+    assert result.sources == ["ferrari_tyre_degradation_estimates.csv (2025, HARD)"] and result.cited
+
+
+def test_caveats_are_computed_from_the_numbers():
+    assert any("includes zero" in c for c in _interval_caveats(-0.02, 0.10, 15))
+    assert _interval_caveats(0.01, 0.05, 3) == ["Only 3 stints back this number."]
+    assert _interval_caveats(0.01, 0.05, 20) == []
+    assert _interval_caveats(None, None, 20) == []
+
+
+def test_tool_results_carry_summary_and_flag_overlapping_drivers():
+    data = load_data()
+    if data is None:
+        return
+    result = call_tool(data, "get_driver_degradation", {"year": 2026, "compound": "SOFT"})
+    assert result["summary"] and isinstance(result["caveats"], list)
+    assert result["higher_slope_driver"] in {"LEC", "HAM"}
+    assert result["intervals_overlap"] == any("overlap" in c for c in result["caveats"])
+    estimate = call_tool(data, "get_degradation_estimate", {"year": 2025, "compound": "HARD"})
+    assert estimate["degradation_s_per_tyre_lap"] == round(estimate["degradation_s_per_tyre_lap"], 3)
